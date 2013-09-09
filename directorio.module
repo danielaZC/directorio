@@ -1,0 +1,409 @@
+<?php
+
+/**
+	*Implements hook_menu()
+	*/
+
+function directorio_menu() {
+	$items = array();
+	$items["directorio"] = array(
+		'title' => 'Directorio', //titulo de pagina y titulo de menu
+		'description' => 'Listado de contactos en el sitio',
+		'page callback' => 'directorio_page',
+		// 'access callback' => 'user_access',
+		'access arguments' => array("ver directorio"),
+		//'type' => MENU_CALLBACK genera el url sin meterlo a un menu
+		'type' => MENU_NORMAL_ITEM
+		);
+
+	$items["contactos/agregar"] = array(
+		'title' => 'Agregar Contacto',
+		'description' => 'Formulario para agregar un contacto',
+		'page callback' => 'drupal_get_form',
+		'page arguments' => array('directorio_agregarContactoForm'),
+		'access arguments' => array("agregar contacto"),
+		'type' => MENU_NORMAL_ITEM
+		);
+
+	$items["contactos/ver/%"] = array(
+		'title callback' => 'contactosTitle', //titulo dinamico,
+		'title arguments' => array(1, 2),
+		'description' => 'Ver contacto',
+		'page callback' => 'contactosVer',
+		'page arguments' => array(2),
+		'access arguments' => array("ver directorio"),
+		'type' => MENU_CALLBACK
+	);
+
+	/*
+	$items["directorio/buscar"] = array();
+	$items["directorio/buscar/nombre/%"] = array();
+	$items["directorio/buscar/extension/%"] = array();
+	$items["contactos/editar/%"] = array();
+	$items["contactos/eliminar/%"] = array();
+*/
+	return $items;
+}
+
+function contactosTitle($op, $cid){
+	$contacto = contactosLoad($cid);
+
+	$output = "";
+	switch($op) {
+		case "ver":
+			$output = contactoRealname($contacto);
+		break;
+
+		case "editar":
+			$output = t("Editar contacto: !contacto", array("!contacto" => contactoRealname($contacto)));
+		break;
+	}
+
+	return $output;
+}
+
+function contactoRealname($contacto){
+	if(is_array($contacto)){
+		return $contacto["nombre"] . " " . $contacto["apellido_paterno"] . " " . $contacto["apellido_materno"];
+	}
+	else if(is_object($contacto)) {
+		return $contacto->nombre . " " . $contacto->apellido_paterno . " " . $contacto->apellido_materno;
+	}
+	else{
+		return NULL;
+	}
+}
+
+function contactosVer($cid){
+	global $user;
+	$contacto = contactosLoad($cid);
+
+	$persona = new stdClass();
+
+	$persona->nombre = $contacto->nombre;
+	$persona->apellido_paterno = $contacto->apellido_paterno;
+	$persona->apellido_materno = $contacto->apellido_materno;
+	$persona->nombre_completo = contactoRealname($contacto);
+	$persona->departamento = $contacto->departamento;
+	$persona->telefono_oficina = $contacto->telefono_oficina;
+
+	//139.111.%.% y 127.
+	$ip = explode(".", ip_address());
+
+if(($ip[0] == "139" && $ip[1] == "111") || ($ip[0] == "127" && $ip[1] == "0" && $ip[2] == "0" && $ip[3] == "1")) {
+		$persona->email_trabajo = $contacto->email_trabajo;
+		$persona->oficina_extension = $contacto->oficina_extension;
+
+	if(isset($contacto->telefono_celular)) {
+		$persona->telefono_celular = $contacto->telefono_celular;
+	}
+}
+
+	if(user_is_logged_in()) {
+		$persona->email_trabajo = $contacto->email_trabajo;
+		$persona->oficina_extension = $contacto->oficina_extension;
+	
+	if(isset($contacto->telefono_celular)) {
+		$persona->telefono_celular = $contacto->telefono_celular;
+	 }
+	}
+
+	if(user_access("ver datos privados") || $user->mail == $contacto->email_trabajo) {
+
+		$persona->email_trabajo = $contacto->email_trabajo;
+		$persona->email_personal = $contacto->email_personal;
+		$persona->telefono_casa = $contacto->telefono_casa;
+		$persona->oficina_extension = $contacto->oficina_extension;
+	}
+		return theme('ver_contacto', array('contacto' => $persona));
+		//return theme("ver_contacto", array("contacto" => $contacto));
+	
+
+	//$ultimaConsulta = time();
+	//return theme('ver_contacto', array(
+		//'contacto' => $contacto, 
+		//'ultimaConsulta' => $ultimaConsulta));
+
+	// IMPRIMIR NOMBRE, LOS 2 APELLIDOS Y LA FECHA DEL ULTIMO ACCESO
+	//INVESTIGAR EL HOOK_THEME, IMPLEMENTARLO
+	//CREAR UN ARCHIVO QUE SE LLAME CONTACTO-VER.TPL.PHP ES EL TEMPLATE AQUI ES DONDE HAY QUE IMPRMIR LAS COSAS DE ARRIBA
+}
+
+function directorio_theme(){
+	return array(
+		'ver_contacto' => array(
+			'variables' => array("contacto" => NULL),
+			'template' => 'contacto-ver'
+		),
+		'directorio' => array(
+			'variables' => array("contactos" => NULL),
+			'template' => 'directorio')
+	);
+}
+
+//function template_preprocess_ver_contacto(&$variables) {
+//	$variables["ultimaconsulta"] = format_date(time(), "short");
+//}
+//function theme_ver_contacto($variables) {
+//	dsm($variables);
+//	return '<div class="field">' . $variables['contacto']->nombre . '</div>';
+//}
+
+function contactosLoad($cid){
+	return db_select("contactos", "c")
+		->fields("c")
+		->condition("c.cid", $cid, "=")
+		->execute()
+		->fetchObject();
+}
+
+/**
+	* Callback principal de /directorio
+	* Muestra un listado de contactos en el sitio
+	*/
+
+function directorio_page(){
+	$contactos = contactosGetAll();
+
+	if($contactos) {
+		$header = array(
+			'nombre' => array(
+				'data' => t("Nombre"),
+				'field' => 'nombre',
+			),
+			'apellido_paterno' => array(
+				'data' => t("apellido_paterno"),
+				'field' => 'apellido_paterno'
+			),
+			'apellido_materno' => array(
+				'data' => t("apellido_materno"),
+				'field' => 'apellido_materno'
+			),
+			'departamento' => array(
+				'data' => t("departamento"),
+				'field' => 'departamento'
+			),
+			'ver' => array()
+		);
+
+		$rows = array();
+
+		foreach ($contactos as $contacto) {
+			$row["nombre"] = $contacto->nombre;
+			$row["apellido_paterno"] = $contacto->apellido_paterno;
+			$row["apellido_materno"] = $contacto->apellido_materno;
+			$row["departamento"] = $contacto->departamento;
+			$row["ver"] = l(t("ver"), "contactos/ver/" . $contacto->cid);
+
+			$rows[] = $row;
+		}
+
+		return theme("table", array("header" => $header, "rows" => $rows));
+	//return theme("directorio", array("contactos" => $contactos));
+		//este era el de directorio.tpl.php 
+	}
+		else{
+			drupal_set_message(t("No se encuentran contactos que mostrar"));
+		}
+}
+
+/**
+	* Callback para contactos/agregar
+	* Muestra la forma para agregar un contacto
+	*/
+function directorio_agregarContactoForm($form){
+	$form = array();
+
+	$form["nombre"] = array(
+		'#type' => 'textfield',
+		'#title' => t("Nombre"),
+		'#required' => TRUE,
+		'#description' => t("Escriba el nombre o los nombres de contacto")
+	);
+
+	$form["apellido_paterno"] = array(
+		'#type' => 'textfield',
+		'#title' => t("Apellido paterno"),
+		'#required' => TRUE,
+		'#description' => t("Escriba el apellido paterno")
+	);
+
+	$form["apellido_materno"] = array(
+		'#type' => 'textfield',
+		'#title' => t("Apellido materno"),
+		'#required' => FALSE,
+		'#description' => t("Escriba el apellido materno")
+	);
+
+	$form["departamento"] = array(
+		'#type' => 'select',
+		'#title' =>t("Departamento"),
+		'#required' => TRUE,
+		'#description' => t("Seleccione el departamento al que pertenece esta persona"),
+		'#options' => getDepartamento()
+	);
+
+	$form["telefono_oficina"] = array(
+		'#type' => 'textfield',
+		'#title' => t("Telefono de oficina"),
+		'#required' => TRUE,
+		'#description' => t("Escriba el telefono de oficina"),
+		'#default_value' => _telefonoDeOficinaDefault()
+	);
+
+	$form["oficina_extension"] = array(
+		'#type' => 'textfield',
+		'#title' =>  t("Extension Telefonica"),
+		'#required' => TRUE,
+		'#description' => t("Escriba la extension telefonica"),
+	);
+
+	$form["email_trabajo"] = array(
+		'#type' => 'textfield',
+		'#title' => t("Email de trabajo"),
+		'#required' => FALSE,
+		'#description' => t("Escriba el email del trabajo")
+	);
+
+	$form["email_personal"] = array(
+		'#type' => 'textfield',
+		'#title' => t("Email personal"),
+		'#required' => FALSE,
+		'#description' => t("Escriba el email personal")
+	);
+
+	$form["telefono_casa"] = array(
+		'#type' => 'textfield',
+		'#title' => t("Telefono de casa"),
+		'#required' => FALSE,
+		'#description' => t("Escriba el telefono de casa")
+	);
+
+	$form["telefono_celular"] = array(
+		'#type' => 'textfield',
+		'#title' => t("Telefono celular"),
+		'#required' => FALSE,
+		'#description' => t("Escriba el telefono celular del contacto")
+	);
+
+	$form["actions"] = array(
+		'#prefix' => '<div class="actions well">',
+		'#suffix' => '</div>'
+	);
+
+	$form["actions"]["submit"] = array(
+		'#type' => 'submit',
+		'#value' => t("Save")
+	);
+
+	return $form;
+}
+/**
+	* Implements hook_permission
+	* 
+	*/
+function directorio_permission(){
+	return array(
+		'ver directorio' => array(
+			'title' => t("Ver el directorio de contactos"),
+			'description' => t("Permite mostrar el directorio de contactos")
+			),
+		'agregar contacto' => array(
+			'title' => t("Ver el formulario para agregar un contacto"),
+			'description' => t("Permite mostrar el formulario para agregar un contacto")
+			),
+		'ver datos privados' => array(
+			'title' => t("Ver datos privados"),
+			'description' => t("Ver datos privados")
+			)
+		);
+}
+
+/**
+ *Listado de departamentos en la compañia
+ *
+ * @return array listado de departamento
+ */
+function getDepartamento(){
+	return array(
+		'administracion' => t("Administracion"),
+		'recursos_humanos' => t("Recursos Humanos"),
+		'sistemas' => t("Sistemas"),
+		'ventas' => t("Ventas")
+	);
+}
+
+/**
+ *Numero de telefono por default de la organizacion
+ *
+ * @return string telefono de oficina por default
+ */
+function _telefonoDeOficinaDefault(){
+	return "2020-7350";
+}
+/**
+	* Para validar
+	*	
+	*function directorio_agregarContactoForm_validate(&$form, &$form_state){
+	*	dms($form_state)
+	*}
+	*/
+
+/**
+	* Submit callback para directorio_agregarContactoForm
+	*/
+function directorio_agregarContactoForm_submit(&$form, &$form_state){
+	// form_state es toda la información que se generó de la forma.
+	//dms($form_state)
+  $values = $form_state["values"];
+  dsm($values);
+
+  $persona = array(
+  	'nombre' => $values["nombre"],
+  	'apellido_paterno' => $values["apellido_paterno"],
+  	'apellido_materno' => $values["apellido_materno"],
+  	'departamento' => $values["departamento"],
+  	'telefono_oficina' => $values["telefono_oficina"],
+  	'oficina_extension' => $values["oficina_extension"],
+  	'email_trabajo' => $values["email_trabajo"],
+  	'email_personal' => $values["email_personal"],
+  	'telefono_celular' => $values["telefono_celular"],
+  	'telefono_casa' => $values["telefono_casa"]
+  );
+
+  $cid = db_insert("contactos")
+  	->fields($persona)
+  	->execute();
+
+  if($cid) {
+  	drupal_set_message(t("Se inserto con exito el contacto con id !id", array("!id" => $cid)));
+  }
+  else {
+  	drupal_set_message(t("Hubo un error"), "error");
+  }
+}
+
+/**
+	* Funcion para consultar todos los contactos de la tabla de contactos
+	* @param string $departamento departamento a consultar
+	* @return array resultados de la tabla de contactos
+	*/
+function contactosGetAll($departamento = NULL) {
+	//No es requerido $departamento porque tiene = NULL
+
+	if(isset($departamento)) {
+		$query = db_query("SELECT * FROM {contactos} c WHERE c.departamento = :departamento ORDER BY c.cid ASC", array(":departamento" => $departamento));
+		//con db_query siempre se pone entre corchetes 
+	}
+	else {
+		$query = db_query("SELECT * FROM {contactos} c ORDER BY c.cid ASC");
+	}
+
+	$results = array();
+
+	foreach($query as $result) {
+		$results[$result->cid] = $result;
+	}
+
+	return $results;
+}
